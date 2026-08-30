@@ -6,6 +6,7 @@
     "dev": "bun run --watch src/index.ts"
   },
   "dependencies": {
+    "@yolk-oss/elysia-env": "^3.0.1",
     "elysia": "latest"
   },
   "devDependencies": {
