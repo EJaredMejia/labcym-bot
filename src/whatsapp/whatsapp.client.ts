@@ -34,6 +34,21 @@ export interface SendButtonMessageParams extends SendMessageBaseParams {
   footerText?: string;
 }
 
+export interface SendListMessageParams extends SendMessageBaseParams {
+  buttonText: string;
+  bodyText: string;
+  sections: Array<{
+    title: string;
+    rows: Array<{
+      id: string;
+      title: string;
+      description?: string;
+    }>;
+  }>;
+  headerText?: string;
+  footerText?: string;
+}
+
 export async function sendWhatsAppMessage(
   params: SendWhatsAppMessageParams
 ): Promise<WhatsAppSendResponse> {
@@ -110,3 +125,50 @@ export async function sendButtonMessage(
     },
   });
 }
+
+export async function sendListMessage(
+  params: SendListMessageParams
+): Promise<WhatsAppSendResponse> {
+  const {
+    token,
+    phoneNumberId,
+    to,
+    buttonText,
+    bodyText,
+    sections,
+    headerText,
+    footerText,
+  } = params;
+
+  return sendWhatsAppMessage({
+    token,
+    phoneNumberId,
+    to,
+    payload: {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to,
+      type: "interactive",
+      interactive: {
+        type: "list",
+        ...(headerText ? { header: { type: "text", text: headerText } } : {}),
+        body: { text: bodyText },
+        ...(footerText ? { footer: { text: footerText } } : {}),
+        action: {
+          button: buttonText.slice(0, 20),
+          sections: sections.map((sec) => ({
+            title: sec.title.slice(0, 24),
+            rows: sec.rows.map((row) => ({
+              id: row.id,
+              title: row.title.slice(0, 24),
+              ...(row.description
+                ? { description: row.description.slice(0, 72) }
+                : {}),
+            })),
+          })),
+        },
+      },
+    },
+  });
+}
+
