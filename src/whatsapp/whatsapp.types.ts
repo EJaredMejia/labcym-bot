@@ -60,9 +60,9 @@ export interface WhatsAppMedia {
 }
 
 export interface WhatsAppMessage {
-  from: string; // Sender WhatsApp ID / Phone number
-  id: string; // Message ID (e.g. wamid.HBg...)
-  timestamp: string; // Unix timestamp
+  from: string;
+  id: string;
+  timestamp: string;
   type: WhatsAppMessageType | string;
   text?: {
     body: string;
@@ -138,4 +138,99 @@ export interface WhatsAppError {
   error_data?: {
     details: string;
   };
+}
+
+// -------------------------------------------------------------
+// Outgoing Message Payloads & API Response Types
+// -------------------------------------------------------------
+
+export interface WhatsAppTextMessagePayload {
+  messaging_product: "whatsapp";
+  recipient_type: "individual";
+  to: string;
+  type: "text";
+  text: {
+    preview_url?: boolean;
+    body: string;
+  };
+}
+
+export interface WhatsAppInteractiveButton {
+  type: "reply";
+  reply: {
+    id: string;
+    title: string;
+  };
+}
+
+export interface WhatsAppInteractiveButtonPayload {
+  messaging_product: "whatsapp";
+  recipient_type: "individual";
+  to: string;
+  type: "interactive";
+  interactive: {
+    type: "button";
+    header?: {
+      type: "text";
+      text: string;
+    };
+    body: {
+      text: string;
+    };
+    footer?: {
+      text: string;
+    };
+    action: {
+      buttons: WhatsAppInteractiveButton[];
+    };
+  };
+}
+
+export interface WhatsAppInteractiveListSection {
+  title: string;
+  rows: Array<{
+    id: string;
+    title: string;
+    description?: string;
+  }>;
+}
+
+export interface WhatsAppInteractiveListPayload {
+  messaging_product: "whatsapp";
+  recipient_type: "individual";
+  to: string;
+  type: "interactive";
+  interactive: {
+    type: "list";
+    header?: {
+      type: "text";
+      text: string;
+    };
+    body: {
+      text: string;
+    };
+    footer?: {
+      text: string;
+    };
+    action: {
+      button: string;
+      sections: WhatsAppInteractiveListSection[];
+    };
+  };
+}
+
+export type WhatsAppOutgoingPayload =
+  | WhatsAppTextMessagePayload
+  | WhatsAppInteractiveButtonPayload
+  | WhatsAppInteractiveListPayload;
+
+export interface WhatsAppSendResponse {
+  messaging_product: "whatsapp";
+  contacts: Array<{
+    input: string;
+    wa_id: string;
+  }>;
+  messages: Array<{
+    id: string;
+  }>;
 }

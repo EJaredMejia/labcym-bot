@@ -3,6 +3,9 @@ import { envPlugin } from "./env";
 import { whatsappRouter } from "./whatsapp/whatsapp.router";
 
 const app = new Elysia()
+  .onError(({ code, error }) => {
+    console.error(`💥 [Global Error] [${code}]:`, error);
+  })
   .use(envPlugin)
   .use(whatsappRouter)
   .get("/", () => "Hello Elysia");

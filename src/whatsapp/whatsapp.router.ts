@@ -1,9 +1,42 @@
 import { Elysia, t } from "elysia";
 import { envPlugin } from "../env";
-import type { WhatsAppWebhookPayload } from "./whatsapp.types";
+import { processUserMessage } from "./whatsapp.service";
+import type { WhatsAppMessage, WhatsAppWebhookPayload } from "./whatsapp.types";
+
+function extractUserInput(message?: WhatsAppMessage): string {
+  if (!message) return "";
+
+  if (message.type === "text") {
+    return message.text?.body ?? "";
+  }
+
+  if (message.type === "interactive") {
+    return (
+      message.interactive?.button_reply?.id ??
+      message.interactive?.button_reply?.title ??
+      message.interactive?.list_reply?.id ??
+      message.interactive?.list_reply?.title ??
+      ""
+    );
+  }
+
+  if (message.type === "button") {
+    return message.button?.payload ?? message.button?.text ?? "";
+  }
+
+  return "";
+}
 
 export const whatsappRouter = new Elysia({ prefix: "/whatsapp" })
   .use(envPlugin)
+  .onError(({ code, error, set }) => {
+    console.error(`🚨 [WhatsApp Router Error] [${code}]:`, error);
+    set.status = 500;
+    return {
+      status: "ERROR",
+      message: error instanceof Error ? error.message : "Internal Server Error",
+    };
+  })
   .get(
     "/webhook",
     ({ query, set, env }) => {
@@ -37,66 +70,36 @@ export const whatsappRouter = new Elysia({ prefix: "/whatsapp" })
     console.log("Incoming Webhook payload:", JSON.stringify(body, null, 2));
     const typeBody = body as WhatsAppWebhookPayload;
 
-    try {
-      const entry = typeBody?.entry?.[0];
-      const change = entry?.changes?.[0];
-      const value = change?.value;
-      const message = value?.messages?.[0];
+    const entry = typeBody?.entry?.[0];
+    const change = entry?.changes?.[0];
+    const value = change?.value;
+    const message = value?.messages?.[0];
 
-      if (!message) {
-        return { status: "EVENT_RECEIVED" };
-      }
-
-      const from = message.from; // Sender WhatsApp ID / Phone number
-      const messageType = message.type; // 'text', 'image', 'audio', 'document', etc.
-      const messageId = message.id;
-
-      console.log(`Received message type: ${messageType} from ${from}`);
-
-      const textBody = messageType === "text" ? (message.text?.body ?? "") : "";
-      const token = env.WHATSAPP_TOKEN;
-      const phoneNumberId = env.WHATSAPP_PHONE_NUMBER_ID;
-
-      if (!token || !phoneNumberId) {
-        console.warn(
-          "WHATSAPP_TOKEN or WHATSAPP_PHONE_NUMBER_ID is missing in your environment configuration.",
-        );
-        return { status: "EVENT_RECEIVED" };
-      }
-
-      const responseText = `🤖 Bot received your ${messageType} message${
-        textBody ? `: "${textBody}"` : ""
-      }! The bot is working properly.`;
-
-      const response = await fetch(
-        `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            messaging_product: "whatsapp",
-            recipient_type: "individual",
-            to: from,
-            type: "text",
-            text: {
-              preview_url: false,
-              body: responseText,
-            },
-          }),
-        },
-      );
-
-      const result = await response.json();
-      console.log("WhatsApp API response:", result);
-    } catch (error) {
-      console.error("Error processing WhatsApp webhook:", error);
+    if (!message) {
+      return { status: "EVENT_RECEIVED" };
     }
+
+    const token = env.WHATSAPP_TOKEN;
+    const phoneNumberId = env.WHATSAPP_PHONE_NUMBER_ID;
+
+    if (!token || !phoneNumberId) {
+      console.warn("WHATSAPP_TOKEN or WHATSAPP_PHONE_NUMBER_ID is missing.");
+      return { status: "EVENT_RECEIVED" };
+    }
+
+    const from = message.from;
+    const userInput = extractUserInput(message);
+
+    await processUserMessage({
+      token,
+      phoneNumberId,
+      recipientPhone: from,
+      userInput,
+      adminPhoneNumber: env.ADMIN_PHONE_NUMBER,
+      ntfyTopic: env.NTFY_TOPIC,
+    });
 
     return {
       status: "EVENT_RECEIVED",
     };
   });
-
