@@ -149,15 +149,15 @@ export async function processUserMessage(params: ProcessUserMessageParams) {
       text: message,
     });
 
-    if (!isOpen) return;
-
-    // Send push notification via ntfy
+    // TEMP TEST: Always send ntfy notification regardless of isOpen status
     if (ntfyTopic) {
       await sendNtfyAlert({
         topic: ntfyTopic,
         clientPhone: recipientPhone,
       });
     }
+
+    if (!isOpen) return;
 
     // Optional direct WhatsApp alert if adminPhoneNumber is also configured
     if (adminPhoneNumber && adminPhoneNumber !== recipientPhone) {
@@ -189,7 +189,7 @@ export async function processUserMessage(params: ProcessUserMessageParams) {
     bodyText: welcomeText,
     buttons: [
       { id: "btn_info", title: "Ubicación y Horario" },
-      { id: "btn_human", title: "Hablar con persona" },
+      { id: "btn_human", title: "Atención al cliente" },
     ],
     headerText: "Menú Principal",
     footerText: "Toca un botón para continuar",
