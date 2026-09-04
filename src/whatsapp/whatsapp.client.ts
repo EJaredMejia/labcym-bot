@@ -1,174 +1,87 @@
-import { createFetch } from "@better-fetch/fetch";
-import type {
-  WhatsAppOutgoingPayload,
-  WhatsAppSendResponse,
-} from "./whatsapp.types";
+import { getBaileysSocket } from "./baileys.service";
 
-export const whatsappFetch = createFetch({
-  baseURL: "https://graph.facebook.com/v21.0",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  throw: true,
-});
-
-export interface SendMessageBaseParams {
-  token: string;
-  phoneNumberId: string;
-  to: string;
-}
-
-export interface SendWhatsAppMessageParams extends SendMessageBaseParams {
-  payload: WhatsAppOutgoingPayload;
-}
-
-export interface SendTextMessageParams extends SendMessageBaseParams {
+export interface SendBaileysTextMessageParams {
+  to: string; // remoteJid or phone number
   text: string;
-  previewUrl?: boolean;
 }
 
-export interface SendButtonMessageParams extends SendMessageBaseParams {
+export interface MenuItem {
+  id?: string;
+  title: string;
+}
+
+export interface SendBaileysMenuMessageParams {
+  to: string;
   bodyText: string;
-  buttons: Array<{ id: string; title: string }>;
+  options: MenuItem[];
   headerText?: string;
   footerText?: string;
 }
 
-export interface SendListMessageParams extends SendMessageBaseParams {
-  buttonText: string;
-  bodyText: string;
-  sections: Array<{
-    title: string;
-    rows: Array<{
-      id: string;
-      title: string;
-      description?: string;
-    }>;
-  }>;
-  headerText?: string;
-  footerText?: string;
+export interface SendBaileysLocationMessageParams {
+  to: string;
+  degreesLatitude: number;
+  degreesLongitude: number;
+  name?: string;
+  address?: string;
 }
 
-export async function sendWhatsAppMessage(
-  params: SendWhatsAppMessageParams
-): Promise<WhatsAppSendResponse> {
-  const { token, phoneNumberId, payload } = params;
-  if (!token || !phoneNumberId) {
-    throw new Error("Missing WhatsApp token or phoneNumberId");
+function normalizeJid(to: string): string {
+  if (to.includes("@")) return to;
+  return `${to.replace(/\D/g, "")}@s.whatsapp.net`;
+}
+
+/**
+ * Sends a plain text message via Baileys socket.
+ */
+export async function sendTextMessage(params: SendBaileysTextMessageParams) {
+  const socket = getBaileysSocket();
+  const jid = normalizeJid(params.to);
+  return socket.sendMessage(jid, { text: params.text });
+}
+
+/**
+ * Sends a native WhatsApp location pin message via Baileys socket.
+ */
+export async function sendLocationMessage(
+  params: SendBaileysLocationMessageParams,
+) {
+  const socket = getBaileysSocket();
+  const jid = normalizeJid(params.to);
+  return socket.sendMessage(jid, {
+    location: {
+      degreesLatitude: params.degreesLatitude,
+      degreesLongitude: params.degreesLongitude,
+      name: params.name,
+      address: params.address,
+    },
+  });
+}
+
+/**
+ * Sends a numbered interactive menu format compatible with all WhatsApp clients.
+ * Formats options cleanly with numbers so users can easily respond.
+ */
+export async function sendMenuMessage(params: SendBaileysMenuMessageParams) {
+  const socket = getBaileysSocket();
+  const jid = normalizeJid(params.to);
+
+  let formatted = "";
+  if (params.headerText) {
+    formatted += `*${params.headerText}*\n\n`;
+  }
+  formatted += `${params.bodyText}\n\n`;
+
+  params.options.forEach((opt, index) => {
+    formatted += `*${index + 1}.* ${opt.title}\n`;
+  });
+
+  if (params.footerText) {
+    formatted += `\n_${params.footerText}_`;
+  } else {
+    formatted += `\n_Responde con el número de tu opción._`;
   }
 
-  const data = await whatsappFetch<WhatsAppSendResponse>(
-    `/${phoneNumberId}/messages`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      body: payload,
-    }
-  );
-
-  return data;
-}
-
-export async function sendTextMessage(
-  params: SendTextMessageParams
-): Promise<WhatsAppSendResponse> {
-  const { token, phoneNumberId, to, text, previewUrl = false } = params;
-  return sendWhatsAppMessage({
-    token,
-    phoneNumberId,
-    to,
-    payload: {
-      messaging_product: "whatsapp",
-      recipient_type: "individual",
-      to,
-      type: "text",
-      text: {
-        preview_url: previewUrl,
-        body: text,
-      },
-    },
-  });
-}
-
-export async function sendButtonMessage(
-  params: SendButtonMessageParams
-): Promise<WhatsAppSendResponse> {
-  const { token, phoneNumberId, to, bodyText, buttons, headerText, footerText } =
-    params;
-
-  return sendWhatsAppMessage({
-    token,
-    phoneNumberId,
-    to,
-    payload: {
-      messaging_product: "whatsapp",
-      recipient_type: "individual",
-      to,
-      type: "interactive",
-      interactive: {
-        type: "button",
-        ...(headerText ? { header: { type: "text", text: headerText } } : {}),
-        body: { text: bodyText },
-        ...(footerText ? { footer: { text: footerText } } : {}),
-        action: {
-          buttons: buttons.slice(0, 3).map((btn) => ({
-            type: "reply" as const,
-            reply: {
-              id: btn.id,
-              title: btn.title.slice(0, 20),
-            },
-          })),
-        },
-      },
-    },
-  });
-}
-
-export async function sendListMessage(
-  params: SendListMessageParams
-): Promise<WhatsAppSendResponse> {
-  const {
-    token,
-    phoneNumberId,
-    to,
-    buttonText,
-    bodyText,
-    sections,
-    headerText,
-    footerText,
-  } = params;
-
-  return sendWhatsAppMessage({
-    token,
-    phoneNumberId,
-    to,
-    payload: {
-      messaging_product: "whatsapp",
-      recipient_type: "individual",
-      to,
-      type: "interactive",
-      interactive: {
-        type: "list",
-        ...(headerText ? { header: { type: "text", text: headerText } } : {}),
-        body: { text: bodyText },
-        ...(footerText ? { footer: { text: footerText } } : {}),
-        action: {
-          button: buttonText.slice(0, 20),
-          sections: sections.map((sec) => ({
-            title: sec.title.slice(0, 24),
-            rows: sec.rows.map((row) => ({
-              id: row.id,
-              title: row.title.slice(0, 24),
-              ...(row.description
-                ? { description: row.description.slice(0, 72) }
-                : {}),
-            })),
-          })),
-        },
-      },
-    },
-  });
+  return socket.sendMessage(jid, { text: formatted });
 }
 

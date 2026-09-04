@@ -1,21 +1,11 @@
-import { Elysia } from "elysia";
-import { envPlugin } from "./env";
-import { whatsappRouter } from "./whatsapp/whatsapp.router";
+import { initBaileys } from "./whatsapp/baileys.service";
 
-const app = new Elysia()
-  .onError(({ code, error }) => {
-    console.error(`💥 [Global Error] [${code}]:`, error);
-  })
-  .use(envPlugin)
-  .use(whatsappRouter)
-  .get("/", () => "Hello Elysia");
+console.log("=========================================");
+console.log("   🚀 Starting LABCYM WhatsApp Bot 🚀   ");
+console.log("=========================================");
 
-if (process.env.NODE_ENV !== "production") {
-  app.listen(process.env.PORT || 3000);
-  console.log(
-    `🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`
-  );
-}
-
-export default app;
-
+// Initialize Baileys WhatsApp client
+initBaileys().catch((err) => {
+  console.error("💥 Fatal error starting Baileys client:", err);
+  process.exit(1);
+});

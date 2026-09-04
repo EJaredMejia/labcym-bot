@@ -3,12 +3,37 @@ import { toZonedTime } from "date-fns-tz";
 import { sendNtfyAlert } from "../notifications/ntfy.service";
 import { isChatPaused, pauseChat, resumeChat } from "../redis/session.service";
 import {
-  sendButtonMessage,
-  sendTextMessage
+  sendLocationMessage,
+  sendMenuMessage,
+  sendTextMessage,
 } from "./whatsapp.client";
 
 const HONDURAS_TIMEZONE = "America/Tegucigalpa";
 const WEBSITE_URL = "https://sites.google.com/view/labcym/inicio";
+const GOOGLE_MAPS_URL = "https://maps.google.com/?q=Laboratorio+Clinico+LABCYM+Villadela";
+
+// Coordenadas aproximadas de Barrio Villadela, Tegucigalpa
+const LABCYM_LOCATION = {
+  degreesLatitude: 14.08639,
+  degreesLongitude: -87.21444,
+  name: "Laboratorio Clínico LABCYM",
+  address: "Barrio Villadela, 6ta Avenida, entre 15 y 16 Calle #1509",
+};
+
+export const BUSINESS_SCHEDULE_TEXT =
+  "• Lunes a Viernes: 8:00 AM - 4:00 PM\n" +
+  "• Sábados: 8:00 AM - 12:00 PM\n" +
+  "• Domingos: Cerrado";
+
+export const OUT_OF_HOURS_MESSAGE =
+  "*Horario de atención*\n\n" +
+  "Actualmente nos encontramos fuera de nuestro horario de servicio.\n\n" +
+  "*Horarios de atención:*\n" +
+  BUSINESS_SCHEDULE_TEXT + "\n\n" +
+  "Déjanos tu mensaje y te responderemos lo más pronto posible.";
+
+export const AGENT_CONNECTING_MESSAGE =
+  "Ya te atenderemos. Un asesor se comunicará contigo en breve. Por favor describe detalladamente tu consulta.";
 
 interface CheckBusinessHoursResult {
   isOpen: boolean;
@@ -20,21 +45,13 @@ export function checkBusinessHours(
 ): CheckBusinessHoursResult {
   const zonedDate = toZonedTime(new Date(), timezone);
   const dayOfWeek = getDay(zonedDate); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
-  const hours = getHours(zonedDate);
-  const minutes = getMinutes(zonedDate);
-  const currentMinutes = hours * 60 + minutes;
+  const currentMinutes = getHours(zonedDate) * 60 + getMinutes(zonedDate);
 
   // 0 = Sunday (Closed)
   if (dayOfWeek === 0) {
     return {
       isOpen: false,
-      message:
-        "⚠️ En este momento nos encontramos fuera de horario de atención.\n\n" +
-        "📅 *Horarios de atención personalizada:*\n" +
-        "• Lunes a Viernes: 8:00 AM - 4:00 PM\n" +
-        "• Sábados: 8:00 AM - 12:00 PM\n" +
-        "• Domingos: Cerrado\n\n" +
-        "Deja tu mensaje o duda y con gusto te responderemos el lunes a primera hora.",
+      message: OUT_OF_HOURS_MESSAGE,
     };
   }
 
@@ -44,17 +61,13 @@ export function checkBusinessHours(
     if (!isSaturdayOpen) {
       return {
         isOpen: false,
-        message:
-          "⚠️ En este momento nos encontramos fuera de horario de atención.\n\n" +
-          "📅 *Horario de los sábados:* 8:00 AM a 12:00 PM.\n\n" +
-          "Deja tu consulta y te responderemos el lunes a las 8:00 AM.",
+        message: OUT_OF_HOURS_MESSAGE,
       };
     }
 
     return {
       isOpen: true,
-      message:
-        "✅ Espera un momento, por favor, que ya le atienden. Por favor describe tu consulta y en breve nos comunicaremos contigo.",
+      message: AGENT_CONNECTING_MESSAGE,
     };
   }
 
@@ -63,42 +76,58 @@ export function checkBusinessHours(
   if (!isWeekdayOpen) {
     return {
       isOpen: false,
-      message:
-        "⚠️ En este momento nos encontramos fuera de horario de atención.\n\n" +
-        "📅 *Horarios de atención personalizada:*\n" +
-        "• Lunes a Viernes: 8:00 AM - 4:00 PM\n" +
-        "• Sábados: 8:00 AM - 12:00 PM\n" +
-        "• Domingos: Cerrado\n\n" +
-        "Déjanos tu mensaje y te responderemos tan pronto abramos.",
+      message: OUT_OF_HOURS_MESSAGE,
     };
   }
 
   return {
     isOpen: true,
-    message:
-      "✅ Espera un momento, por favor, que ya le atienden. Por favor describe tu consulta y en breve nos comunicaremos contigo.",
+    message: AGENT_CONNECTING_MESSAGE,
   };
 }
 
-interface ProcessUserMessageParams {
-  token: string;
-  phoneNumberId: string;
+export interface ProcessUserMessageParams {
   recipientPhone: string;
+  remoteJid: string;
   userInput: string;
-  adminPhoneNumber?: string;
+  productTitle?: string;
   ntfyTopic?: string;
 }
 
 export async function processUserMessage(params: ProcessUserMessageParams) {
   const {
-    token,
-    phoneNumberId,
     recipientPhone,
+    remoteJid,
     userInput,
-    adminPhoneNumber,
-    ntfyTopic,
+    productTitle,
+    ntfyTopic = "",
   } = params;
   const normalized = userInput.trim().toLowerCase();
+
+  // Handle WhatsApp Catalog / Product Inquiries
+  if (productTitle) {
+    await pauseChat(recipientPhone, 3600);
+
+    if (ntfyTopic) {
+      await sendNtfyAlert({
+        topic: ntfyTopic,
+        clientPhone: recipientPhone,
+        title: "Labcym: Consulta sobre Producto de Catálogo",
+        message: `El cliente +${recipientPhone} está consultando sobre el producto/examen: "${productTitle}".`,
+      });
+    }
+
+    const reply =
+      `*Consulta sobre:* ${productTitle}\n\n` +
+      "Gracias por comunicarte con *LABCYM*. Hemos notificado a nuestro equipo sobre tu consulta y un asesor te atenderá a la brevedad para brindarte información sobre precios, disponibilidad y preparación requerida.\n\n" +
+      "_Para utilizar el menú interactivo en cualquier momento, escribe *menu*._";
+
+    await sendTextMessage({
+      to: remoteJid,
+      text: reply,
+    });
+    return;
+  }
 
   // If user explicitly asks to return to menu or reset bot, unpause immediately
   const isExplicitMenuTrigger =
@@ -124,189 +153,93 @@ export async function processUserMessage(params: ProcessUserMessageParams) {
     }
   }
 
-  // 1. Requisitos para exámenes (Opción 2 del menú de la imagen)
-  const isRequirementsQuery =
-    normalized === "opt_requisitos" ||
-    normalized.includes("requisito") ||
-    normalized.includes("ayuno") ||
-    normalized.includes("indicacion") ||
-    normalized.includes("indicación") ||
-    normalized.includes("examen") ||
-    normalized.includes("exámenes");
-
-  if (isRequirementsQuery) {
-    // Pause bot responses for 1 hour so the user can send photos/questions without bot interruptions
-    await pauseChat(recipientPhone, 3600);
-
-    if (ntfyTopic) {
-      await sendNtfyAlert({
-        topic: ntfyTopic,
-        clientPhone: recipientPhone,
-        title: "Labcym: Consulta de Requisitos de Exámenes",
-        message: `El cliente +${recipientPhone} está consultando los requisitos para sus exámenes (ayuno, indicaciones).`,
-      });
-    }
-
-    const text =
-      "📋 *Requisitos para tus Exámenes*\n\n" +
-      "¡Con gusto te orientamos!\n\n" +
-      "Hemos notificado a nuestro equipo sobre tu consulta. Por favor escríbenos qué tipo de examen necesitas realizarte o envíanos una foto de tu orden médica, y en breve te indicaremos las instrucciones necesarias (tiempo de ayuno, preparación, etc.).\n\n" +
-      `🌐 También puedes consultar información general en nuestro sitio web:\n${WEBSITE_URL}\n\n` +
-      "💡 _Si deseas volver a hablar con el bot en cualquier momento, escribe *salir*._";
-
-    return sendButtonMessage({
-      token,
-      phoneNumberId,
-      to: recipientPhone,
-      bodyText: text,
-      buttons: [
-        { id: "btn_menu", title: "Ver menú principal" },
-        { id: "opt_asesor", title: "Hablar con asesor" },
-      ],
-      headerText: "Requisitos de Exámenes",
-    });
-  }
-
-  // 2. Consultar o recibir resultados (Opción 4 del menú)
-  const isResultsQuery =
-    normalized === "opt_resultados" ||
-    normalized.includes("resultado") ||
-    normalized.includes("recibir") ||
-    normalized.includes("consultar resultado");
+  // 1. Consultar o recibir resultados (Option 1 in main menu)
+  const isResultsQuery = normalized === "1";
 
   if (isResultsQuery) {
     const text =
-      "📑 *Consulta y Entrega de Resultados*\n\n" +
-      "En *LABCYM* te facilitamos la entrega de tus resultados:\n\n" +
-      "📩 *Vía Correo Electrónico:* Te enviamos tus resultados en formato PDF directamente a tu email.\n" +
-      "📲 *Vía WhatsApp:* Podemos compartirlos directamente por este chat.\n\n" +
-      "Si deseas consultar el estado de tus resultados o solicitarlos, indícanos tu nombre completo y número de identidad o déjanos tu mensaje aquí.";
+      "*Entrega y Consulta de Resultados*\n\n" +
+      "Disponemos de las siguientes modalidades de entrega:\n\n" +
+      "• *Correo electrónico:* Envío directo de tus resultados en formato PDF.\n" +
+      "• *WhatsApp:* Podemos enviártelo a tu número telefónico de WhatsApp.\n\n" +
+      "Para consultar el estado de tu orden, por favor indícanos tu nombre completo y número de identidad.\n\n" +
+      "_Escribe *menu* para volver al menú principal o *3* para hablar con un asesor._";
 
-    return sendButtonMessage({
-      token,
-      phoneNumberId,
-      to: recipientPhone,
-      bodyText: text,
-      buttons: [
-        { id: "btn_menu", title: "Ver menú principal" },
-        { id: "opt_asesor", title: "Hablar con asesor" },
-      ],
-      headerText: "Entrega de Resultados",
+    return sendTextMessage({
+      to: remoteJid,
+      text,
     });
   }
 
-  // 3. Ubicaciones y horarios de atención (Opción 5 del menú)
-  const isLocationQuery =
-    normalized === "opt_ubicacion" ||
-    normalized === "btn_info" ||
-    normalized.includes("ubicacion") ||
-    normalized.includes("ubicación") ||
-    normalized.includes("horario") ||
-    normalized.includes("direccion") ||
-    normalized.includes("dirección") ||
-    normalized.includes("donde estan") ||
-    normalized.includes("dónde están");
+  // 2. Ubicaciones y horarios de atención (Option 2 in main menu)
+  const isLocationQuery = normalized === "2";
 
   if (isLocationQuery) {
     const text =
-      "📍 *Ubicación y Horarios de Atención*\n\n" +
-      "🏢 *Dirección exacta:*\n" +
-      "Laboratorio clínico LABCYM barrio villadela 6ta avenida entre 15 y 16 calle No 1509 primera planta local 2 en el pasillo frente a carnitas villadela.\n\n" +
-      "🕒 *Horarios de atención:*\n" +
-      "• Lunes a Viernes: 8:00 AM - 4:00 PM\n" +
-      "• Sábados: 8:00 AM - 12:00 PM\n" +
-      "• Domingos: Cerrado\n\n" +
-      `🌐 Para ver más información en nuestro sitio web:\n${WEBSITE_URL}`;
+      "*Ubicación y Horarios de Atención*\n\n" +
+      "*Dirección:*\n" +
+      "Laboratorio Clínico LABCYM, Barrio Villadela, 6ta Avenida, entre 15 y 16 Calle #1509, 1ra Planta, Local 2 (frente a Carnitas Villadela).\n\n" +
+      "*Horarios:*\n" +
+      BUSINESS_SCHEDULE_TEXT + "\n\n" +
+      `*Google Maps:* ${GOOGLE_MAPS_URL}\n` +
+      `*Sitio web:* ${WEBSITE_URL}\n\n` +
+      "_Escribe *menu* para volver al menú principal._";
 
-    return sendButtonMessage({
-      token,
-      phoneNumberId,
-      to: recipientPhone,
-      bodyText: text,
-      buttons: [
-        { id: "btn_menu", title: "Ver menú principal" },
-        { id: "opt_asesor", title: "Hablar con asesor" },
-      ],
-      headerText: "Ubicación y Horarios",
+    await sendTextMessage({
+      to: remoteJid,
+      text,
+    });
+
+    return sendLocationMessage({
+      to: remoteJid,
+      ...LABCYM_LOCATION,
     });
   }
 
-  // 4. Hablar con un asesor (Opción 6 del menú)
-  const isHumanQuery =
-    normalized === "opt_asesor" ||
-    normalized === "btn_human" ||
-    normalized.includes("asesor") ||
-    normalized.includes("humano") ||
-    normalized.includes("persona") ||
-    normalized.includes("hablar") ||
-    normalized.includes("atencion") ||
-    normalized.includes("atención");
+  // 3. Cotizaciones, requisitos y atención personalizada (Option 3 in main menu)
+  const isHumanQuery = normalized === "3";
 
   if (isHumanQuery) {
     const { isOpen, message } = checkBusinessHours();
 
-    // Pause bot responses for 1 hour so the human conversation is uninterrupted
     await pauseChat(recipientPhone, 3600);
 
     const fullMessage =
       message +
-      "\n\n💡 _Si deseas cancelar la atención con el asesor y regresar al bot, escribe *salir*._";
+      "\n\n_Escribe *menu* para cancelar la solicitud y volver al menú principal._";
 
-    // Reply to the client first
     await sendTextMessage({
-      token,
-      phoneNumberId,
-      to: recipientPhone,
+      to: remoteJid,
       text: fullMessage,
     });
 
-    // Send ntfy notification
-    if (ntfyTopic) {
+    if (isOpen) {
       await sendNtfyAlert({
         topic: ntfyTopic,
         clientPhone: recipientPhone,
         title: "Labcym: Solicitud de Atención al cliente",
-        message: `El cliente +${recipientPhone} ha solicitado hablar con un asesor.`,
-      });
-    }
-
-    if (!isOpen) return;
-
-    // Optional direct WhatsApp alert if adminPhoneNumber is configured
-    if (adminPhoneNumber && adminPhoneNumber !== recipientPhone) {
-      const alertText =
-        "🔔 *¡NUEVA SOLICITUD DE ATENCIÓN!* 🔔\n\n" +
-        `El cliente *+${recipientPhone}* ha solicitado atención.\n\n` +
-        `👉 *Abrir chat con cliente:* https://wa.me/${recipientPhone}`;
-
-      await sendTextMessage({
-        token,
-        phoneNumberId,
-        to: adminPhoneNumber,
-        text: alertText,
+        message: `El cliente +${recipientPhone} ha solicitado atención personalizada (cotización / requisitos / dudas).`,
       });
     }
 
     return;
   }
 
-  // 5. Menú Principal con 3 botones interactivos
+  // 4. Menú Principal
   const menuBody =
-    "¡Hola! 👋 Te damos la bienvenida a *LABCYM*, tu laboratorio clínico de confianza.\n\n" +
-    "Estamos aquí para atenderte de forma rápida y sencilla. ¿Cómo podemos ayudarte hoy?\n\n" +
-    `🌐 *Sitio Web:* ${WEBSITE_URL}`;
+    "Bienvenido al servicio de atención de *LABCYM*.\n\n" +
+    "Seleccione una de las siguientes opciones para continuar:\n\n" +
+    `Sitio web: ${WEBSITE_URL}`;
 
-  return sendButtonMessage({
-    token,
-    phoneNumberId,
-    to: recipientPhone,
-    headerText: "Laboratorio LABCYM",
+  return sendMenuMessage({
+    to: remoteJid,
+    headerText: "Laboratorio Clínico LABCYM",
     bodyText: menuBody,
-    footerText: "Toca un botón para continuar",
-    buttons: [
+    footerText: "Responda con el número de su opción",
+    options: [
       { id: "opt_resultados", title: "Mis resultados" },
-      { id: "opt_ubicacion", title: "Ubicación y horario" },
-      { id: "opt_asesor", title: "Hablar con asesor" },
+      { id: "opt_ubicacion", title: "Ubicación y horarios" },
+      { id: "opt_asesor", title: "Cotizaciones y atención personalizada" },
     ],
   });
 }
