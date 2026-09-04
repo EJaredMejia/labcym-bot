@@ -239,7 +239,7 @@ export async function processUserMessage(params: ProcessUserMessageParams) {
     options: [
       { id: "opt_resultados", title: "Mis resultados" },
       { id: "opt_ubicacion", title: "Ubicación y horarios" },
-      { id: "opt_asesor", title: "Cotizaciones y atención personalizada" },
+      { id: "opt_asesor", title: "Hablar con un asesor" },
     ],
   });
 }
