@@ -228,8 +228,8 @@ export async function processUserMessage(params: ProcessUserMessageParams) {
   // 4. Menú Principal
   const menuBody =
     "Bienvenido al servicio de atención de *LABCYM*.\n\n" +
-    "Seleccione una de las siguientes opciones para continuar:\n\n" +
-    `Sitio web: ${WEBSITE_URL}`;
+    `Sitio web: ${WEBSITE_URL}\n\n` +
+    "Seleccione una de las siguientes opciones para continuar:";
 
   return sendMenuMessage({
     to: remoteJid,
